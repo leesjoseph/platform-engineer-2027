@@ -105,3 +105,34 @@ resource "aws_eks_node_group" "node_group" {
     aws_iam_role_policy_attachment.node_group-AmazonEC2ContainerRegistryReadOnly,
   ]
 }
+
+data "tls_certificate" "eks" {
+  url = aws_eks_cluster.cluster.identity[0].oidc[0].issuer
+}
+
+resource "aws_iam_openid_connect_provider" "eks" {
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = [data.tls_certificate.eks.certificates[0].sha1_fingerprint]
+  url             = aws_eks_cluster.cluster.identity[0].oidc[0].issuer
+}
+
+resource "aws_iam_role" "eks_oidc_role" {
+  name = "${var.aws_iam_role_name}-eks-oidc-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.eks.arn
+        }
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Condition = {
+          StringEquals = {
+            "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub" = "system:serviceaccount:default:example-sa"
+          }
+        }
+      },
+    ]
+  })
+}
